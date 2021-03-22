@@ -1,15 +1,21 @@
-//
-//  fileexplorer.c
+//fileexplorer.c
 //
 //
 //  Created by Mauricio de Garay on 25/01/2021.
 //
+#include <ctype.h>
 #include <curses.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <ctype.h>
+#include <string.h>
+#include <sys/mman.h>
 /* Function prototypes. */
 
 /*
@@ -36,6 +42,245 @@ char * openFolder(char * folderName, char *lastFolder);
 *
 */
 void showFileInfo(char * filename);
+
+
+/**
+ *      PRUEBA
+ * */
+int hex_to_int(char c){
+        int result;
+        if((c>=65&&c<=90)||(c>=97&&c<=122)){
+            result=toupper(c);
+            result=result-55;
+        }
+        else{
+            result=48;
+        }    
+        if(c>=48&&c<=57){
+            result=c-48;
+        }
+        return result;
+}
+
+int hex_to_decimal(char c, char d){
+        int high = hex_to_int(c) * 16;
+        int low = hex_to_int(d);
+        return high+low;
+}
+
+/* Variable global para mejor legibilidad */
+int fd; // Archivo a leer
+
+
+char *hazLinea(char *base, int dir) {
+	char linea[100]; // La linea es mas pequeña
+	int o=0;
+	// Muestra 16 caracteres por cada linea
+	o += sprintf(linea,"%08x ",dir); // offset en hexadecimal
+	for(int i=0; i < 4; i++) {
+		unsigned char a,b,c,d;
+		a = base[dir+4*i+0];
+		b = base[dir+4*i+1];
+		c = base[dir+4*i+2];
+		d = base[dir+4*i+3];
+		o += sprintf(&linea[o],"%02x %02x %02x %02x ", a, b, c, d);
+	}
+	for(int i=0; i < 16; i++) {
+		if (isprint(base[dir+i])) {
+			o += sprintf(&linea[o],"%c",base[dir+i]);
+		}
+		else {
+			o += sprintf(&linea[o],".");
+		}
+	}
+	sprintf(&linea[o],"\n");
+
+	return(strdup(linea));
+}
+char *mapWrite(char *filePath, char *agregar, int cl, int rn){
+     /* Abre archivo */
+    int fd = open(filePath, O_RDWR);
+    if (fd == -1) {
+    	//perror("Error abriendo el archivo");
+	    exit(1);
+    }
+
+      /* Mapea archivo */
+    struct stat st;
+    int err = fstat(fd, &st);
+    if(err < 0){
+        //printf("\n\"%s \" no se pudo abrir\n", filePath);
+        exit(2);
+    }
+     int fs = st.st_size;
+    char *ptr = mmap(0, fs, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+    if(ptr == MAP_FAILED){
+        //printf("Mapping Failed\n");
+        exit(1);
+    }
+
+    ptr[cl+(16*rn)]=*agregar;
+    /*FILE *N=fopen("tamanio.txt", "wt");
+    fprintf(N, "%d y %d y el contenido es: %c\n", rn, cl, ptr[cl+cl*rn]);
+    fclose(N);*/
+
+    /*ptr = mmap(0, fs, PROT_READ, MAP_SHARED, fd, 0);*/
+    close(fd);
+    return ptr;
+
+}
+
+char *mapFile(char *filePath) {
+    /* Abre archivo */
+    fd = open(filePath, O_RDWR);
+    if (fd == -1) {
+    	perror("Error abriendo el archivo");
+	    return(NULL);
+    }
+
+    /* Mapea archivo */
+    struct stat st;
+    fstat(fd,&st);
+    int fs = st.st_size;
+
+    char *map = mmap(0, fs, PROT_READ, MAP_SHARED, fd, 0);
+    if (map == MAP_FAILED) {
+    	close(fd);
+	    perror("Error mapeando el archivo");
+	    return(NULL);
+    }
+
+  return map;
+}
+
+int leeChar() {
+  int chars[5];
+  int ch,i=0;
+  nodelay(stdscr, TRUE);
+  while((ch = getch()) == ERR); /* Espera activa */
+  ungetch(ch);
+  while((ch = getch()) != ERR) {
+    chars[i++]=ch;
+  }
+  /* convierte a numero con todo lo leido */
+  int res=0;
+  for(int j=0;j<i;j++) {
+    res <<=8;
+    res |= chars[j];
+  }
+  return res;
+}
+
+
+int edita(char *filename) {
+    FILE *N=NULL;
+    char *nuevo, hex[100];
+    int x=0, y=0, c=0, rn, cl, validar=1, sumaHex;
+    /* Lee archivo */
+    char *map = mapFile(filename);
+    if (map == NULL) {
+      exit(EXIT_FAILURE);
+      }
+    
+    for(int i= 0; i<25; i++) {
+    	// Haz linea, base y offset
+    	char *l = hazLinea(map,i*16);
+	    mvprintw(i,0,l);
+    }
+    do{
+      if(cl>71){
+        y+=1;
+        x=0;
+      }
+      if(x<0){
+          y-=1;
+          x=0;
+      }
+      if(rn<0){
+          x=0;
+          y=0;
+      }
+      rn = 0+y;
+      cl = (x < 16) ? 9+x*3 : 41+x;
+      move(rn, cl); // Renglón, columna
+      refresh();
+
+      c = leeChar();
+      switch(c){
+        case KEY_UP: // Flecha arriba
+          y=y-1;
+          break;
+        case KEY_DOWN:
+          y +=1;
+          break;
+        case KEY_RIGHT:
+          x+=1;
+          break;
+        case KEY_LEFT:
+          x-=1;
+          break;
+        case 10:
+            clear();
+            refresh();
+        return 0;
+            break;
+          default:
+            nuevo = hazLinea(map,rn*16);
+            if(validar==1){
+                nuevo[cl]= c;
+                validar=0;
+            }else{
+                if(cl>56){
+                     nuevo[cl]= c;
+                    validar=1;
+                }else{
+                    nuevo[cl+1] = c;
+                    validar=1;
+                }
+                
+            }
+            /*for(int i=9; i<71; i++){
+                hex[i-9]=nuevo[i];
+            }*/
+            if(cl>54){
+                if(isprint(nuevo[cl])){
+                    *hex=(char)nuevo[cl];
+                    map=mapWrite(filename, hex, x, rn-1);
+                }          
+
+            }else{
+                 sumaHex=hex_to_decimal(nuevo[cl], nuevo[cl+1]);
+                *hex=(char)sumaHex;
+                map=mapWrite(filename, hex, x, rn);
+            }
+             hazLinea(map,rn*16);
+                nuevo=hazLinea(map,rn*16);
+                mvprintw(rn,0,nuevo);
+                move(rn, cl); // Renglón, columna
+                refresh();
+           
+            //printf("%s\n\n", nuevo);
+          break;
+      }
+    
+
+    }while(c!=10);
+
+   //leeChar();
+
+
+    if (munmap(map, fd) == -1) {
+      perror("Error al desmapear");
+    }
+    close(fd);
+    
+   return 0;
+
+}
+
+/**
+ *  FIN PRUEBA
+ * */
 int main()
 {
     char *option;
@@ -195,7 +440,9 @@ char * openFolder(char * folderName, char *lastFolder)
                 if((strcmp(Type, "File"))==0)
                 {
                     //Show chosen file's info.
-                    showFileInfo(nextFolder);
+                    //hexEditor(nextFolder);
+                    edita(nextFolder);
+                    //showFileInfo(nextFolder);
                     //Stay in the same folder as we started out on.
                     strcpy(nextFolder, folderName);
                 }
