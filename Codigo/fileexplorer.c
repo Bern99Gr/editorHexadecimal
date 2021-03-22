@@ -1,7 +1,7 @@
 //fileexplorer.c
 //
 //
-//  Created by Mauricio de Garay on 25/01/2021.
+//  Created by Mauricio de Garay, Bernardo García y Samantha Morris on 25/01/2021.
 //
 #include <ctype.h>
 #include <curses.h>
